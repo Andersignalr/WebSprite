@@ -1,71 +1,63 @@
-const keys = {};
-// =======================
+// ===============================
 // CANVAS
-// =======================
+// ===============================
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-// =======================
-// BACKGROUND
-// =======================
+// ===============================
+// CONFIG
+// ===============================
 
-document.addEventListener("keydown", e => {
-    keys[e.key] = true;
-});
+const MOVE_SPEED = 120; // pixels por segundo
+const NETWORK_RATE = 50; // ms (20 updates por segundo)
 
-document.addEventListener("keyup", e => {
-    keys[e.key] = false;
-});
+const FRAME_WIDTH = 32;
+const FRAME_HEIGHT = 32;
+const FRAME_COUNT = 4;
+const ANIMATION_SPEED = 10;
+
+// ===============================
+// ASSETS
+// ===============================
 
 const bg = new Image();
 bg.src = "mapa.png";
 
-let bgLoaded = false;
-
-bg.onload = () => {
-    bgLoaded = true;
-};
-
-// =======================
-// SPRITE CONFIG
-// =======================
-
 const playerSprite = new Image();
 playerSprite.src = "player.png";
 
-const FRAME_WIDTH = 32;
-const FRAME_HEIGHT = 32;
-const FRAME_COUNT = 4; // 4 colunas
-const ANIMATION_SPEED = 8;
+// ===============================
+// STATE
+// ===============================
 
+let players = {};
+let myId = null;
+let keys = {};
+let lastTime = 0;
 let animationTick = 0;
+let lastNetworkUpdate = 0;
 
-// =======================
+// ===============================
 // SIGNALR
-// =======================
+// ===============================
 
 const connection = new signalR.HubConnectionBuilder()
     .withUrl("/gamehub")
     .build();
 
-let players = {};
-let myId = null;
-
 connection.on("PlayerJoined", player => {
-    players[player.id] = {
-        ...player,
-        direction: 0, // 0 baixo, 1 esquerda, 2 direita, 3 cima
-        frame: 0,
-        moving: false
-    };
+    players[player.id] = createPlayer(player);
 });
 
 connection.on("PlayerMoved", player => {
     if (!players[player.id]) return;
 
-    players[player.id].x = player.x;
-    players[player.id].y = player.y;
+    if (player.id !== myId) {
+        // Interpolação simples
+        players[player.id].targetX = player.x;
+        players[player.id].targetY = player.y;
+    }
 });
 
 connection.on("PlayerLeft", id => {
@@ -76,92 +68,127 @@ connection.start().then(() => {
     myId = connection.connectionId;
 });
 
-// =======================
-// MOVIMENTO
-// =======================
+// ===============================
+// PLAYER FACTORY
+// ===============================
+
+function createPlayer(data) {
+    return {
+        id: data.id,
+        x: data.x,
+        y: data.y,
+        targetX: data.x,
+        targetY: data.y,
+        direction: 0,
+        frame: 0,
+        moving: false
+    };
+}
+
+// ===============================
+// INPUT
+// ===============================
 
 document.addEventListener("keydown", e => {
+    keys[e.key] = true;
+});
+
+document.addEventListener("keyup", e => {
+    keys[e.key] = false;
+});
+
+// ===============================
+// UPDATE
+// ===============================
+
+function update(deltaTime) {
+
     if (!players[myId]) return;
 
     let p = players[myId];
-    p.moving = true;
+    p.moving = false;
 
-    if (e.key === "ArrowUp") {
-        p.y -= 5;
+    let distance = MOVE_SPEED * deltaTime;
+
+    if (keys["ArrowUp"]) {
+        p.y -= distance;
         p.direction = 3;
+        p.moving = true;
     }
 
-    if (e.key === "ArrowDown") {
-        p.y += 5;
+    if (keys["ArrowDown"]) {
+        p.y += distance;
         p.direction = 0;
+        p.moving = true;
     }
 
-    if (e.key === "ArrowLeft") {
-        p.x -= 5;
+    if (keys["ArrowLeft"]) {
+        p.x -= distance;
         p.direction = 1;
+        p.moving = true;
     }
 
-    if (e.key === "ArrowRight") {
-        p.x += 5;
+    if (keys["ArrowRight"]) {
+        p.x += distance;
         p.direction = 2;
+        p.moving = true;
     }
 
-    connection.invoke("Move", p.x, p.y);
-});
+    // Interpolação dos outros players
+    for (let id in players) {
+        if (id === myId) continue;
 
-document.addEventListener("keyup", () => {
+        let other = players[id];
+
+        other.x += (other.targetX - other.x) * 0.1;
+        other.y += (other.targetY - other.y) * 0.1;
+    }
+}
+
+// ===============================
+// NETWORK TICK
+// ===============================
+
+function networkTick(time) {
+
     if (!players[myId]) return;
 
-    players[myId].moving = false;
-    players[myId].frame = 0;
-});
+    if (time - lastNetworkUpdate > NETWORK_RATE) {
+        let p = players[myId];
+        connection.invoke("Move", p.x, p.y);
+        lastNetworkUpdate = time;
+    }
+}
 
-// =======================
-// DRAW LOOP
-// =======================
+// ===============================
+// RENDER
+// ===============================
 
-function gameLoop() {
-
-    update();
+function render() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (bgLoaded) {
-        drawBackground();
-    }
+    drawBackground();
 
-    for (let id in players) {
-        drawPlayer(players[id]);
-    }
+    // Ordenar por Y (profundidade 2.5D)
+    const sortedPlayers = Object.values(players)
+        .sort((a, b) => a.y - b.y);
 
-    requestAnimationFrame(gameLoop);
+    for (let p of sortedPlayers) {
+        drawPlayer(p);
+    }
 }
 
 function drawBackground() {
-    const imgRatio = bg.width / bg.height;
-    const canvasRatio = canvas.width / canvas.height;
-
-    let drawWidth, drawHeight;
-
-    if (imgRatio > canvasRatio) {
-        drawHeight = canvas.height;
-        drawWidth = canvas.height * imgRatio;
-    } else {
-        drawWidth = canvas.width;
-        drawHeight = canvas.width / imgRatio;
-    }
-
-    const x = (canvas.width - drawWidth) / 2;
-    const y = (canvas.height - drawHeight) / 2;
-
-    ctx.drawImage(bg, x, y, drawWidth, drawHeight);
+    ctx.drawImage(bg, 0, 0, canvas.width, canvas.height);
 }
 
 function drawPlayer(p) {
 
+    if (!playerSprite.complete || playerSprite.naturalWidth === 0) return;
+
     if (p.moving) {
         animationTick++;
-
         if (animationTick % ANIMATION_SPEED === 0) {
             p.frame = (p.frame + 1) % FRAME_COUNT;
         }
@@ -182,46 +209,20 @@ function drawPlayer(p) {
     );
 }
 
-function update() {
+// ===============================
+// GAME LOOP
+// ===============================
 
-    if (!players[myId]) return;
+function gameLoop(time) {
 
-    let p = players[myId];
-    let speed = 2;
+    let deltaTime = (time - lastTime) / 1000;
+    lastTime = time;
 
-    p.moving = false;
+    update(deltaTime);
+    networkTick(time);
+    render();
 
-    if (keys["ArrowUp"]) {
-        p.y -= speed;
-        p.direction = 3;
-        p.moving = true;
-    }
-
-    if (keys["ArrowDown"]) {
-        p.y += speed;
-        p.direction = 0;
-        p.moving = true;
-    }
-
-    if (keys["ArrowLeft"]) {
-        p.x -= speed;
-        p.direction = 1;
-        p.moving = true;
-    }
-
-    if (keys["ArrowRight"]) {
-        p.x += speed;
-        p.direction = 2;
-        p.moving = true;
-    }
-
-    if (p.moving) {
-        connection.invoke("Move", p.x, p.y);
-    }
+    requestAnimationFrame(gameLoop);
 }
 
-// =======================
-// START
-// =======================
-
-gameLoop();
+requestAnimationFrame(gameLoop);
