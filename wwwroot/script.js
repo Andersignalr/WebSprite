@@ -1,3 +1,5 @@
+let DEBUG_MODE = false;
+
 let tilesetImages = [];
 
 const FOOT_WIDTH = 20;
@@ -5,6 +7,8 @@ const FOOT_HEIGHT = 10;
 
 let mapData = null;
 let collisionLayer = null;
+
+let interactLayer = null;
 
 // ===============================
 // WORLD CONFIG
@@ -76,20 +80,21 @@ connection.on("PlayerJoined", player => {
 connection.on("PlayerMoved", player => {
     if (!players[player.id]) return;
 
-    console.log("Recebido do servidor:", player);
-
     if (player.id !== myId) {
-        // Interpolação simples
-        if (player.id !== myId) {
 
-            let other = players[player.id];
+        let other = players[player.id];
 
-            other.targetX = player.x;
-            other.targetY = player.y;
+        other.startX = other.x;
+        other.startY = other.y;
 
-            other.direction = player.direction;
-            other.moving = player.moving;
-        }
+        other.targetX = player.x;
+        other.targetY = player.y;
+
+        other.direction = player.direction;
+        other.moving = player.moving;
+
+        other.lerpTime = 0;
+        other.lerpDuration = NETWORK_RATE / 1000; // tempo entre pacotes
     }
 });
 
@@ -199,25 +204,25 @@ function update(deltaTime) {
     let newX = p.x;
     let newY = p.y;
 
-    if (keys["ArrowUp"]) {
+    if (keys["w"] || keys["W"]) {
         newY -= distance;
         p.direction = 3;
         p.moving = true;
     }
 
-    if (keys["ArrowDown"]) {
+    if (keys["s"] || keys["S"]) {
         newY += distance;
         p.direction = 0;
         p.moving = true;
     }
 
-    if (keys["ArrowLeft"]) {
+    if (keys["a"] || keys["A"]) {
         newX -= distance;
         p.direction = 1;
         p.moving = true;
     }
 
-    if (keys["ArrowRight"]) {
+    if (keys["d"] || keys["D"]) {
         newX += distance;
         p.direction = 2;
         p.moving = true;
@@ -245,26 +250,20 @@ function update(deltaTime) {
 
         let other = players[id];
 
-        let prevX = other.x;
-        let prevY = other.y;
+        if (other.lerpTime < other.lerpDuration) {
 
-        other.x += (other.targetX - other.x) * 0.1;
-        other.y += (other.targetY - other.y) * 0.1;
+            other.lerpTime += deltaTime;
 
+            let t = other.lerpTime / other.lerpDuration;
 
-        // Detectar movimento
-        //other.moving = Math.abs(other.x - prevX) > 0.01 ||
-        //    Math.abs(other.y - prevY) > 0.01;
+            if (t > 1) t = 1;
 
-        // Atualizar direção baseado no movimento
-        //let dx = other.targetX - other.x;
-        //let dy = other.targetY - other.y;
+            // 🔥 AQUI entra o smoothstep
+            t = t * t * (3 - 2 * t);
 
-        //if (Math.abs(dx) > Math.abs(dy)) {
-        //    other.direction = dx > 0 ? 2 : 1; // direita : esquerda
-        //} else {
-        //    other.direction = dy > 0 ? 0 : 3; // baixo : cima
-        //}
+            other.x = other.startX + (other.targetX - other.startX) * t;
+            other.y = other.startY + (other.targetY - other.startY) * t;
+        }
     }
 
     // ===============================
@@ -400,6 +399,8 @@ function render() {
 
     // 3️⃣ Over (na frente)
     drawTileLayer("Over");
+
+    renderDebug();
 }
 
 function drawPlayer(p) {
@@ -466,6 +467,8 @@ fetch("mapa.json")
         MAP_WIDTH = mapData.width * mapData.tilewidth;
         MAP_HEIGHT = mapData.height * mapData.tileheight;
 
+        interactLayer = mapData.layers.find(l => l.name === "Interact");
+
         loadTilesets().then(() => {
             requestAnimationFrame(gameLoop);
         });
@@ -488,3 +491,187 @@ function gameLoop(time) {
 }
 
 //requestAnimationFrame(gameLoop);
+
+function checkInteraction() {
+
+    if (!interactLayer) return null;
+
+    let p = players[myId];
+    let point = getInteractionPoint(p);
+
+    for (let obj of interactLayer.objects) {
+
+        if (
+            point.x >= obj.x &&
+            point.x <= obj.x + obj.width &&
+            point.y >= obj.y &&
+            point.y <= obj.y + obj.height
+        ) {
+            return obj;
+        }
+    }
+
+    return null;
+}
+
+document.addEventListener("keydown", e => {
+    if (e.key === "e") {
+
+        let obj = checkInteraction();
+
+        if (obj) {
+            handleInteraction(obj);
+        }
+    }
+});
+
+
+function handleInteraction(obj) {
+
+    switch (obj.type) {
+
+        case "chest":
+            console.log("Abrindo baú!");
+            break;
+
+        case "door":
+            console.log("Entrando na porta!");
+            break;
+
+        default:
+            console.log("Tipo desconhecido:", obj.type);
+    }
+}
+
+function getInteractionPoint(player) {
+
+    if (!player) return null;
+
+    const centerX = player.x + FRAME_WIDTH / 2;
+    const feetY = player.y + FRAME_HEIGHT;
+
+    const offset = 12;
+
+    switch (player.direction) {
+        case 3: // up
+            return { x: centerX, y: player.y - offset };
+
+        case 0: // down
+            return { x: centerX, y: feetY + offset };
+
+        case 1: // left
+            return { x: player.x - offset, y: feetY - 8 };
+
+        case 2: // right
+            return { x: player.x + FRAME_WIDTH + offset, y: feetY - 8 };
+    }
+
+    return null;
+}
+
+function renderDebug() {
+
+    if (!DEBUG_MODE) return;
+    if (!players[myId]) return;
+
+    // 🔴 Hitbox do pé
+    let foot = getFootHitbox(players[myId].x, players[myId].y);
+
+    ctx.strokeStyle = "red";
+    ctx.strokeRect(
+        foot.x - camera.x,
+        foot.y - camera.y,
+        foot.width,
+        foot.height
+    );
+
+    // 🔵 Área dos objetos interativos
+    if (interactLayer) {
+        for (let obj of interactLayer.objects) {
+
+            ctx.strokeStyle = "blue";
+            ctx.strokeRect(
+                obj.x - camera.x,
+                obj.y - camera.y,
+                obj.width,
+                obj.height
+            );
+        }
+    }
+
+    // 🟡 Ponto de interação frontal
+    let point = getInteractionPoint(players[myId]);
+
+    if (point) {
+        ctx.fillStyle = "yellow";
+        ctx.beginPath();
+        ctx.arc(
+            point.x - camera.x,
+            point.y - camera.y,
+            4,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
+    }
+
+    //colision box
+    const tileSize = mapData.tilewidth;
+
+    for (let row = 0; row < mapData.height; row++) {
+        for (let col = 0; col < mapData.width; col++) {
+
+            const index = row * mapData.width + col;
+            const gid = collisionLayer.data[index];
+
+            if (gid === 0) continue;
+
+            ctx.fillStyle = "rgba(255, 0, 255, 0.3)"; // roxo transparente
+
+            ctx.fillRect(
+                col * tileSize - camera.x,
+                row * tileSize - camera.y,
+                tileSize,
+                tileSize
+            );
+        }
+    }
+
+    //pes tocando
+    if (DEBUG_MODE && players[myId]) {
+
+        const tileSize = mapData.tilewidth;
+        const foot = getFootHitbox(players[myId].x, players[myId].y);
+
+        let leftTile = Math.floor(foot.x / tileSize);
+        let rightTile = Math.floor((foot.x + foot.width - 1) / tileSize);
+        let topTile = Math.floor(foot.y / tileSize);
+        let bottomTile = Math.floor((foot.y + foot.height - 1) / tileSize);
+
+        ctx.strokeStyle = "lime";
+        ctx.lineWidth = 2;
+
+        const tiles = [
+            [leftTile, topTile],
+            [rightTile, topTile],
+            [leftTile, bottomTile],
+            [rightTile, bottomTile]
+        ];
+
+        for (let [col, row] of tiles) {
+            ctx.strokeRect(
+                col * tileSize - camera.x,
+                row * tileSize - camera.y,
+                tileSize,
+                tileSize
+            );
+        }
+    }
+}
+
+document.addEventListener("keydown", e => {
+    if (e.key === "F2") {
+        DEBUG_MODE = !DEBUG_MODE;
+        console.log("DEBUG:", DEBUG_MODE ? "ON" : "OFF");
+    }
+});
