@@ -15,18 +15,26 @@ public class GameHub : Hub
             Y = 100
         };
 
-        Players[Context.ConnectionId] = player;
+        // Envia todos jogadores existentes para quem acabou de entrar
+        await Clients.Caller.SendAsync("ExistingPlayers", Players.Values);
 
+        // Adiciona novo jogador
+        Players[player.Id] = player;
+
+        // Avisa todos sobre o novo jogador
         await Clients.All.SendAsync("PlayerJoined", player);
+
         await base.OnConnectedAsync();
     }
 
-    public async Task Move(float x, float y)
+    public async Task Move(float x, float y, int direction, bool moving)
     {
         if (Players.TryGetValue(Context.ConnectionId, out var player))
         {
             player.X = x;
             player.Y = y;
+            player.Direction = direction;
+            player.Moving = moving;
 
             await Clients.All.SendAsync("PlayerMoved", player);
         }
