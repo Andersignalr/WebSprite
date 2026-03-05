@@ -93,53 +93,45 @@ let npcs = [];
 
 function loadNPCs() {
 
-    if (!mapData || !mapData.layers) {
-        console.warn("mapData ainda não carregado");
-        return;
+    
+    if (!interactLayer) return;
+
+    for (let obj of interactLayer.objects) {
+
+        if (obj.type === "npc") {
+
+            let sprite = new Image();
+            sprite.src = "npc.png";
+
+            sprite.onload = () => {
+
+                const frameWidth = sprite.width / 6;
+                const frameHeight = sprite.height;
+
+                npcs.push({
+
+                    x: obj.x,
+                    y: obj.y,
+
+                    sprite: sprite,
+
+                    frame: 0,
+                    frameCount: 6,
+
+                    frameWidth: sprite.width / 6,
+                    frameHeight: sprite.height,
+
+                    frameTimer: 0,
+                    frameSpeed: 10,
+
+                    dialog: obj.name || ""
+
+                });
+
+            };
+
+        }
     }
-
-    const npcLayer = mapData.layers.find(l => l.name === "Interact");
-
-    if (!npcLayer || !npcLayer.objects) {
-        console.warn("Interact npc não encontrada");
-        return;
-    }
-
-    for (let obj of npcLayer.objects) {
-
-        // garante que é npc
-        if (obj.type !== "npc") continue;
-
-        let npc = {
-            id: obj.id,
-            name: obj.name || "npc",
-
-            x: obj.x,
-            y: obj.y - obj.height, // alinhar com tile
-
-            width: obj.width,
-            height: obj.height,
-
-            sprite: new Image(),
-
-            frameWidth: obj.width,
-            frameHeight: obj.height,
-
-            frameX: 0,
-            frameTimer: 0,
-            frameSpeed: 10,
-            frameCount: 6,
-
-            dialog: getProperty(obj, "dialog") || "..."
-        };
-
-        // caminho correto
-        npc.sprite.src ="npc.png";
-
-        npcs.push(npc);
-    }
-
-    console.log("NPCs carregados:", npcs.length);
 }
 
 const connection = new signalR.HubConnectionBuilder()
@@ -262,7 +254,7 @@ document.addEventListener("keyup", e => {
 });
 
 // ===============================
-// UPDATE
+// UPDATE function
 // ===============================
 
 function update(deltaTime) {
@@ -385,36 +377,7 @@ function update(deltaTime) {
 
     }
 
-    npcAnimationTick++;
-
-    if (npcAnimationTick % NPC_ANIMATION_SPEED === 0) {
-
-        for (let npc of npcs) {
-
-            npc.frame++;
-            if (npc.frame >= NPC_FRAME_COUNT) {
-                npc.frame = 0;
-            }
-
-        }
-
-    }
-
-    for (let npc of npcs) {
-
-        npc.frameTimer++;
-
-        if (npc.frameTimer >= npc.frameSpeed) {
-
-            npc.frameTimer = 0;
-
-            npc.frameX += npc.frameWidth;
-
-            if (npc.frameX >= npc.frameWidth * npc.frameCount) {
-                npc.frameX = 0;
-            }
-        }
-    }
+    updateNPCs(deltaTime);
 }
 
 // ===============================
@@ -563,7 +526,7 @@ function render() {
     }
     //NPC
     for (let npc of npcs) {
-        drawNPC(npc);
+        drawNPCs(npc);
     }
 }
 
@@ -926,19 +889,27 @@ function interact() {
 
 loadNPCs();
 
-function drawNPC(npc) {
+function drawNPCs() {
 
-    ctx.drawImage(
-        npc.sprite,
-        npc.frameX * npc.FRAME_WIDTH,
-        0,
-        npc.frameWidth,
-        npc.frameHeight,
-        Math.round(npc.x - camera.x),
-        Math.round(npc.y - camera.y),
-        npc.frameWidth,
-        npc.frameHeight
-    );
+    for (let npc of npcs) {
+
+        ctx.drawImage(
+            npc.sprite,
+
+            npc.frame * npc.frameWidth,
+            0,
+
+            npc.frameWidth,
+            npc.frameHeight,
+
+            npc.x - npc.frameWidth / 2 - camera.x,
+            npc.y - npc.frameHeight - camera.y,
+
+            npc.frameWidth,
+            npc.frameHeight
+        );
+
+    }
 
 }
 
@@ -949,4 +920,27 @@ function getProperty(obj, name) {
     let prop = obj.properties.find(p => p.name === name);
 
     return prop ? prop.value : null;
+}
+
+
+function updateNPCs(deltaTime) {
+
+    for (let npc of npcs) {
+
+        npc.frameTimer++;
+
+        if (npc.frameTimer >= npc.frameSpeed) {
+
+            npc.frameTimer = 0;
+
+            npc.frame++;
+
+            if (npc.frame >= npc.frameCount) {
+                npc.frame = 0;
+            }
+
+        }
+
+    }
+
 }
