@@ -1,4 +1,24 @@
+const npcSprite = new Image();
+npcSprite.src = "npc.png";
+
+const NPC_FRAME_WIDTH = 32;
+const NPC_FRAME_HEIGHT = 32;
+const NPC_FRAME_COUNT = 6;
+const NPC_ANIMATION_SPEED = 12;
+
+let npcAnimationTick = 0;
+
+let dialogActive = false;
+let dialogLines = [];
+let dialogIndex = 0;
+
+let highlightPulse = 0;
+
 let DEBUG_MODE = false;
+
+let interactPressed = false;
+
+let highlightedObject = null;
 
 let tilesetImages = [];
 
@@ -68,6 +88,59 @@ let lastNetworkUpdate = 0;
 // ===============================
 // SIGNALR
 // ===============================
+
+let npcs = [];
+
+function loadNPCs() {
+
+    if (!mapData || !mapData.layers) {
+        console.warn("mapData ainda não carregado");
+        return;
+    }
+
+    const npcLayer = mapData.layers.find(l => l.name === "Interact");
+
+    if (!npcLayer || !npcLayer.objects) {
+        console.warn("Interact npc não encontrada");
+        return;
+    }
+
+    for (let obj of npcLayer.objects) {
+
+        // garante que é npc
+        if (obj.type !== "npc") continue;
+
+        let npc = {
+            id: obj.id,
+            name: obj.name || "npc",
+
+            x: obj.x,
+            y: obj.y - obj.height, // alinhar com tile
+
+            width: obj.width,
+            height: obj.height,
+
+            sprite: new Image(),
+
+            frameWidth: obj.width,
+            frameHeight: obj.height,
+
+            frameX: 0,
+            frameTimer: 0,
+            frameSpeed: 10,
+            frameCount: 6,
+
+            dialog: getProperty(obj, "dialog") || "..."
+        };
+
+        // caminho correto
+        npc.sprite.src ="npc.png";
+
+        npcs.push(npc);
+    }
+
+    console.log("NPCs carregados:", npcs.length);
+}
 
 const connection = new signalR.HubConnectionBuilder()
     .withUrl("/gamehub")
@@ -196,6 +269,8 @@ function update(deltaTime) {
 
     if (!players[myId]) return;
 
+    highlightPulse += 0.05;
+
     let p = players[myId];
     p.moving = false;
 
@@ -301,6 +376,45 @@ function update(deltaTime) {
     // Limitar câmera ao mapa
     camera.x = Math.max(0, Math.min(camera.x, MAP_WIDTH - canvas.width));
     camera.y = Math.max(0, Math.min(camera.y, MAP_HEIGHT - canvas.height));
+
+    if (interactPressed) {
+
+        interact();
+
+        interactPressed = false;
+
+    }
+
+    npcAnimationTick++;
+
+    if (npcAnimationTick % NPC_ANIMATION_SPEED === 0) {
+
+        for (let npc of npcs) {
+
+            npc.frame++;
+            if (npc.frame >= NPC_FRAME_COUNT) {
+                npc.frame = 0;
+            }
+
+        }
+
+    }
+
+    for (let npc of npcs) {
+
+        npc.frameTimer++;
+
+        if (npc.frameTimer >= npc.frameSpeed) {
+
+            npc.frameTimer = 0;
+
+            npc.frameX += npc.frameWidth;
+
+            if (npc.frameX >= npc.frameWidth * npc.frameCount) {
+                npc.frameX = 0;
+            }
+        }
+    }
 }
 
 // ===============================
@@ -379,6 +493,8 @@ function drawTileLayer(layerName) {
 
 function render() {
 
+    highlightedObject = getInteractableObject(players[myId]);
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // 1️⃣ Chão
@@ -386,7 +502,7 @@ function render() {
 
     drawTileLayer("Ground_obj");
 
-
+    
     // 2️⃣ Player
     const sortedPlayers = Object.values(players)
         .sort((a, b) =>
@@ -397,10 +513,58 @@ function render() {
         drawPlayer(p);
     }
 
+    
     // 3️⃣ Over (na frente)
     drawTileLayer("Over");
 
+
+    if (highlightedObject) {
+
+        const pulse = (Math.sin(performance.now() * 0.005) + 1) / 2;
+
+        const x = highlightedObject.x - camera.x + highlightedObject.width / 2;
+        const y = highlightedObject.y - camera.y - 10 - pulse * 4;
+
+        ctx.fillStyle = "yellow";
+        ctx.font = "bold 14px Arial";
+        ctx.textAlign = "center";
+
+        ctx.fillText("E", x, y);
+
+        ctx.beginPath();
+        ctx.arc(x, y - 4, 10 + pulse * 3, 0, Math.PI * 2);
+        ctx.strokeStyle = "yellow";
+        ctx.stroke();
+    }
+
+    
+
     renderDebug();
+    renderHUD();
+
+    if (dialogActive) {
+
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(40, canvas.height - 120, canvas.width - 80, 80);
+
+        ctx.strokeStyle = "white";
+        ctx.strokeRect(40, canvas.height - 120, canvas.width - 80, 80);
+
+        ctx.fillStyle = "white";
+        ctx.font = "16px Arial";
+        ctx.textAlign = "left";
+
+        ctx.fillText(
+            dialogLines[dialogIndex],
+            60,
+            canvas.height - 80
+        );
+
+    }
+    //NPC
+    for (let npc of npcs) {
+        drawNPC(npc);
+    }
 }
 
 function drawPlayer(p) {
@@ -462,12 +626,15 @@ fetch("mapa.json")
         mapData = data;
 
         collisionLayer = mapData.layers.find(l => l.name === "Collision");
+        
+        interactLayer = mapData.layers.find(l => l.name === "Interact");
+
+        loadNPCs();
 
         // 🔥 Atualizar tamanho real do mapa baseado no Tiled
         MAP_WIDTH = mapData.width * mapData.tilewidth;
         MAP_HEIGHT = mapData.height * mapData.tileheight;
 
-        interactLayer = mapData.layers.find(l => l.name === "Interact");
 
         loadTilesets().then(() => {
             requestAnimationFrame(gameLoop);
@@ -492,43 +659,45 @@ function gameLoop(time) {
 
 //requestAnimationFrame(gameLoop);
 
-function checkInteraction() {
 
-    if (!interactLayer) return null;
 
-    let p = players[myId];
-    let point = getInteractionPoint(p);
+document.addEventListener("keydown", (e) => {
 
-    for (let obj of interactLayer.objects) {
+    if (e.key === "e" || e.key === "E") {
 
-        if (
-            point.x >= obj.x &&
-            point.x <= obj.x + obj.width &&
-            point.y >= obj.y &&
-            point.y <= obj.y + obj.height
-        ) {
-            return obj;
+        if (dialogActive) {
+
+            dialogIndex++;
+
+            if (dialogIndex >= dialogLines.length) {
+                dialogActive = false;
+            }
+
+            return;
         }
+
+        interactPressed = true;
+
     }
 
-    return null;
-}
-
-document.addEventListener("keydown", e => {
-    if (e.key === "e") {
-
-        let obj = checkInteraction();
-
-        if (obj) {
-            handleInteraction(obj);
-        }
-    }
 });
+
+
 
 
 function handleInteraction(obj) {
 
+    if (!obj) return;
+
     switch (obj.type) {
+
+        case "npc":
+
+            let dialog = getProperty(obj, "dialog") || "...";
+            dialogIndex = 0;
+            dialogActive = true;
+
+            break;
 
         case "chest":
             console.log("Abrindo baú!");
@@ -545,7 +714,9 @@ function handleInteraction(obj) {
 
 function getInteractionPoint(player) {
 
-    if (!player) return null;
+    if (!player) {
+        return { x: 0, y: 0 };
+    }
 
     const centerX = player.x + FRAME_WIDTH / 2;
     const feetY = player.y + FRAME_HEIGHT;
@@ -553,6 +724,7 @@ function getInteractionPoint(player) {
     const offset = 12;
 
     switch (player.direction) {
+
         case 3: // up
             return { x: centerX, y: player.y - offset };
 
@@ -564,9 +736,10 @@ function getInteractionPoint(player) {
 
         case 2: // right
             return { x: player.x + FRAME_WIDTH + offset, y: feetY - 8 };
-    }
 
-    return null;
+        default:
+            return { x: centerX, y: feetY }; // fallback
+    }
 }
 
 function renderDebug() {
@@ -675,3 +848,105 @@ document.addEventListener("keydown", e => {
         console.log("DEBUG:", DEBUG_MODE ? "ON" : "OFF");
     }
 });
+
+function renderHUD() {
+
+    if (!DEBUG_MODE) return;
+    if (!players[myId]) return;
+
+    const p = players[myId];
+
+    ctx.fillStyle = "white";
+    ctx.font = "14px monospace";
+    ctx.textAlign = "left";
+
+    ctx.fillText(`Player X: ${p.x.toFixed(1)}`, 10, 20);
+    ctx.fillText(`Player Y: ${p.y.toFixed(1)}`, 10, 40);
+
+    const tileSize = mapData.tilewidth;
+
+    const tileX = Math.floor(p.x / tileSize);
+    const tileY = Math.floor(p.y / tileSize);
+
+    ctx.fillText(`Tile X: ${tileX}`, 10, 60);
+    ctx.fillText(`Tile Y: ${tileY}`, 10, 80);
+
+    ctx.fillText(`Camera X: ${camera.x.toFixed(1)}`, 10, 100);
+    ctx.fillText(`Camera Y: ${camera.y.toFixed(1)}`, 10, 120);
+}
+
+function getInteractableObject(player) {
+
+    const point = getInteractionPoint(player);
+    if (!point) return;
+
+    let closest = null;
+    let closestDist = Infinity;
+
+    for (let obj of interactLayer.objects) {
+
+        let objTop = obj.y;
+
+        if (
+            point.x >= obj.x &&
+            point.x <= obj.x + obj.width &&
+            point.y >= objTop &&
+            point.y <= objTop + obj.height
+        ) {
+
+            let dx = point.x - (obj.x + obj.width / 2);
+            let dy = point.y - (objTop + obj.height / 2);
+
+            let dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < closestDist) {
+                closestDist = dist;
+                closest = obj;
+            }
+
+        }
+
+    }
+
+    return closest;
+
+}
+
+function interact() {
+
+    let player = players[myId];
+    if (!player) return;
+
+    let obj = getInteractableObject(player);
+    if (!obj) return;
+
+    handleInteraction(obj);
+
+}
+
+loadNPCs();
+
+function drawNPC(npc) {
+
+    ctx.drawImage(
+        npc.sprite,
+        npc.frameX * npc.FRAME_WIDTH,
+        0,
+        npc.frameWidth,
+        npc.frameHeight,
+        Math.round(npc.x - camera.x),
+        Math.round(npc.y - camera.y),
+        npc.frameWidth,
+        npc.frameHeight
+    );
+
+}
+
+function getProperty(obj, name) {
+
+    if (!obj.properties) return null;
+
+    let prop = obj.properties.find(p => p.name === name);
+
+    return prop ? prop.value : null;
+}
