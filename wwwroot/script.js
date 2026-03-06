@@ -1,3 +1,48 @@
+//Teste
+const itemImages = {};
+
+const INVENTORY_COLS = 5;
+const INVENTORY_ROWS = 4;
+
+const inventory = new Array(INVENTORY_COLS * INVENTORY_ROWS).fill(null);
+
+let inventoryOpen = false;
+
+let invCursorX = 0;
+let invCursorY = 0;
+
+const itemsDB = {
+
+    potion: {
+        name: "Poção",
+        description: "Recupera 50 HP",
+        stack: 10,
+        icon: "items/potion.png"
+    },
+
+    wood: {
+        name: "Madeira",
+        description: "Material",
+        stack: 99,
+        icon: "items/wood.png"
+    },
+
+    sword: {
+        name: "Espada",
+        description: "Ataque +5",
+        stack: 1,
+        icon: "items/sword.png"
+    }
+
+};
+
+const dialogXA = "[Sim->Dungeon:Nao->Nada]"
+let resultado;
+let test = false;
+
+let selectedOption = 0;
+//Teste
+
 const npcSprite = new Image();
 npcSprite.src = "npc.png";
 
@@ -85,6 +130,8 @@ let lastTime = 0;
 let animationTick = 0;
 let lastNetworkUpdate = 0;
 
+loadItemImages();
+
 // ===============================
 // SIGNALR
 // ===============================
@@ -93,7 +140,7 @@ let npcs = [];
 
 function loadNPCs() {
 
-    
+
     if (!interactLayer) return;
 
     for (let obj of interactLayer.objects) {
@@ -111,7 +158,7 @@ function loadNPCs() {
                 npcs.push({
 
                     x: obj.x + frameWidth / 2,
-                    y: obj.y + sprite.height / 2,
+                    y: obj.y + sprite.height,
 
                     sprite: sprite,
 
@@ -253,6 +300,16 @@ document.addEventListener("keyup", e => {
     keys[e.key] = false;
 });
 
+document.addEventListener("keydown", e => {
+
+    if (e.key === "i" || e.key === "I") {
+
+        inventoryOpen = !inventoryOpen;
+
+    }
+
+});
+
 // ===============================
 // UPDATE function
 // ===============================
@@ -271,13 +328,21 @@ function update(deltaTime) {
     let newX = p.x;
     let newY = p.y;
 
+    if (keys["Enter"]) {
+        if (test) {
+            console.log("opcao escolhida: " + resultado.options[selectedOption].text);
+        }
+    }
+
     if (keys["w"] || keys["W"]) {
+
         newY -= distance;
         p.direction = 3;
         p.moving = true;
     }
 
     if (keys["s"] || keys["S"]) {
+
         newY += distance;
         p.direction = 0;
         p.moving = true;
@@ -290,11 +355,14 @@ function update(deltaTime) {
     }
 
     if (keys["d"] || keys["D"]) {
+
         newX += distance;
         p.direction = 2;
         p.moving = true;
+
     }
 
+    
     // 🔥 Testar colisão antes de aplicar
     if (!isColliding(newX, p.y)) {
         p.x = newX;
@@ -465,7 +533,7 @@ function render() {
 
     drawTileLayer("Ground_obj");
 
-    
+
     // 2️⃣ Player
     const sortedPlayers = Object.values(players)
         .sort((a, b) =>
@@ -476,7 +544,7 @@ function render() {
         drawPlayer(p);
     }
 
-    
+
     // 3️⃣ Over (na frente)
     drawTileLayer("Over");
 
@@ -492,19 +560,16 @@ function render() {
         ctx.font = "bold 14px Arial";
         ctx.textAlign = "center";
 
-        let posY = highlightedObject.type == "npc"
-            ? y - highlightedObject.height
-            : y;
 
-        ctx.fillText("E", x, posY);
+        ctx.fillText("E", x, y);
 
         ctx.beginPath();
-        ctx.arc(x, posY - 4, 10 + pulse * 3, 0, Math.PI * 2);
+        ctx.arc(x, y - 4, 10 + pulse * 3, 0, Math.PI * 2);
         ctx.strokeStyle = "yellow";
         ctx.stroke();
     }
 
-    
+
 
     renderDebug();
     renderHUD();
@@ -531,6 +596,13 @@ function render() {
     //NPC
     for (let npc of npcs) {
         drawNPCs(npc);
+    }
+
+    if (test)
+        myTests(resultado);
+
+    if (inventoryOpen) {
+        drawInventory();
     }
 }
 
@@ -593,7 +665,7 @@ fetch("mapa.json")
         mapData = data;
 
         collisionLayer = mapData.layers.find(l => l.name === "Collision");
-        
+
         interactLayer = mapData.layers.find(l => l.name === "Interact");
 
         loadNPCs();
@@ -649,6 +721,51 @@ document.addEventListener("keydown", (e) => {
 
 });
 
+document.addEventListener("keydown", e => {
+
+    if (!test) return;
+
+    if (e.key === "w" || e.key === "W") {
+        selectedOption--;
+    }
+
+    if (e.key === "s" || e.key === "S") {
+        selectedOption++;
+    }
+
+    if (e.key === "Enter") {
+        console.log(
+            "opcao escolhida: " +
+            resultado.options[selectedOption].text
+        );
+    }
+
+});
+
+document.addEventListener("keydown", e => {
+
+    if (!inventoryOpen) return;
+
+    if (e.key === "w" || e.key === "W") {
+        invCursorY--;
+    }
+
+    if (e.key === "s" || e.key === "S") {
+        invCursorY++;
+    }
+
+    if (e.key === "a" || e.key === "A") {
+        invCursorX--;
+    }
+
+    if (e.key === "d" || e.key === "D") {
+        invCursorX++;
+    }
+
+    adjustInventory();
+
+});
+
 
 
 
@@ -669,10 +786,22 @@ function handleInteraction(obj) {
 
         case "chest":
             console.log("Abrindo baú!");
+
+            addItem("wood", 5);
+            addItem("potion", 1);
+
+            console.log("Itens obtidos!");
+
             break;
 
         case "door":
             console.log("Entrando na porta!");
+
+            test = !test;
+
+            resultado = parseDialog(dialogXA);
+            myTests(resultado);
+
             break;
 
         default:
@@ -945,6 +1074,237 @@ function updateNPCs(deltaTime) {
             }
 
         }
+
+    }
+
+}
+
+function parseDialog(str) {
+
+    if (typeof str !== "string") {
+        return { type: "text", value: "" };
+    }
+
+    str = str.trim();
+
+    // verifica se é escolha
+    if (str.startsWith("[") && str.endsWith("]")) {
+
+        const content = str.slice(1, -1);
+
+        const options = content
+            .split(":")
+            .map(opt => opt.trim())
+            .map(opt => {
+                const parts = opt.split("->").map(p => p.trim());
+
+                return {
+                    text: parts[0] || "",
+                    action: parts[1] || null
+                };
+            });
+
+        return {
+            type: "choice",
+            options: options
+        };
+    }
+
+    // se não for escolha, é texto normal
+    return {
+        type: "text",
+        value: str
+    };
+}
+
+function myTests(result) {
+
+
+    console.log(result);
+
+
+    if (result.type === "choice") {
+
+        selectedOption = Math.max(0, Math.min(selectedOption, result.options.length - 1));
+
+        let desloc = 0;
+
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(40, canvas.height - 120, canvas.width - 80, 80);
+
+        ctx.strokeStyle = "white";
+        ctx.strokeRect(40, canvas.height - 120, canvas.width - 80, 80);
+
+        ctx.fillStyle = "white";
+        ctx.font = "16px Arial";
+        ctx.textAlign = "left";
+
+        for (let [index, option] of result.options.entries()) {
+
+            if (index === selectedOption) {
+                ctx.fillStyle = "yellow";
+            } else {
+                ctx.fillStyle = "white";
+            }
+
+            ctx.fillText(
+                option.text,
+                60,
+                canvas.height - 90 + desloc
+            );
+
+            desloc += 20;
+        }
+
+    }
+}
+
+function addItem(itemId, amount = 1) {
+
+    const itemData = itemsDB[itemId];
+
+    // tentar empilhar
+    for (let slot of inventory) {
+
+        if (slot && slot.id === itemId) {
+
+            if (slot.qty < itemData.stack) {
+
+                let space = itemData.stack - slot.qty;
+                let add = Math.min(space, amount);
+
+                slot.qty += add;
+                amount -= add;
+
+                if (amount <= 0) return true;
+            }
+        }
+    }
+
+    // colocar em slot vazio
+    for (let i = 0; i < inventory.length; i++) {
+
+        if (inventory[i] === null) {
+
+            inventory[i] = {
+                id: itemId,
+                qty: amount
+            };
+
+            return true;
+        }
+
+    }
+
+    return false; // inventário cheio
+}
+
+function removeItem(itemId, amount = 1) {
+
+    let item = inventory.find(i => i.id === itemId);
+
+    if (!item) return;
+
+    item.qty -= amount;
+
+    if (item.qty <= 0) {
+        inventory.splice(inventory.indexOf(item), 1);
+    }
+
+}
+
+function drawInventory() {
+
+    const slotSize = 48;
+    const startX = 100;
+    const startY = 80;
+
+    ctx.fillStyle = "rgba(0,0,0,0.8)";
+    ctx.fillRect(80, 60, 320, 260);
+
+    for (let y = 0; y < INVENTORY_ROWS; y++) {
+        for (let x = 0; x < INVENTORY_COLS; x++) {
+
+            let index = getInvIndex(x, y);
+            let slot = inventory[index];
+
+            let px = startX + x * slotSize;
+            let py = startY + y * slotSize;
+
+            ctx.strokeStyle = "white";
+            ctx.strokeRect(px, py, slotSize, slotSize);
+
+            if (x === invCursorX && y === invCursorY) {
+
+                ctx.strokeStyle = "yellow";
+                ctx.lineWidth = 3;
+                ctx.strokeRect(px, py, slotSize, slotSize);
+                ctx.lineWidth = 1;
+
+            }
+
+            if (slot) {
+
+                let item = itemsDB[slot.id];
+
+                ctx.fillStyle = "white";
+                ctx.font = "12px Arial";
+
+                if (slot) {
+
+                    const img = itemImages[slot.id];
+
+                    if (img && img.complete) {
+
+                        ctx.drawImage(
+                            img,
+                            px + 8,
+                            py + 8,
+                            32,
+                            32
+                        );
+
+                    }
+
+                    if (slot.qty > 1) {
+
+                        ctx.fillStyle = "white";
+                        ctx.font = "12px Arial";
+                        ctx.fillText(
+                            slot.qty,
+                            px + 40,
+                            py + 40
+                        );
+
+                    }
+
+                }
+
+
+
+            }
+
+        }
+    }
+}
+
+function getInvIndex(x, y) {
+    return y * INVENTORY_COLS + x;
+}
+
+function adjustInventory() {
+    invCursorX = Math.max(0, Math.min(invCursorX, INVENTORY_COLS - 1));
+    invCursorY = Math.max(0, Math.min(invCursorY, INVENTORY_ROWS - 1));
+}
+
+function loadItemImages() {
+
+    for (let id in itemsDB) {
+
+        const img = new Image();
+        img.src = itemsDB[id].icon;
+
+        itemImages[id] = img;
 
     }
 
