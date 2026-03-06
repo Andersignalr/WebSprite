@@ -110,8 +110,8 @@ function loadNPCs() {
 
                 npcs.push({
 
-                    x: obj.x,
-                    y: obj.y,
+                    x: obj.x + frameWidth / 2,
+                    y: obj.y + sprite.height / 2,
 
                     sprite: sprite,
 
@@ -492,10 +492,14 @@ function render() {
         ctx.font = "bold 14px Arial";
         ctx.textAlign = "center";
 
-        ctx.fillText("E", x, y);
+        let posY = highlightedObject.type == "npc"
+            ? y - highlightedObject.height
+            : y;
+
+        ctx.fillText("E", x, posY);
 
         ctx.beginPath();
-        ctx.arc(x, y - 4, 10 + pulse * 3, 0, Math.PI * 2);
+        ctx.arc(x, posY - 4, 10 + pulse * 3, 0, Math.PI * 2);
         ctx.strokeStyle = "yellow";
         ctx.stroke();
     }
@@ -657,6 +661,7 @@ function handleInteraction(obj) {
         case "npc":
 
             let dialog = getProperty(obj, "dialog") || "...";
+            dialogLines = dialog.split("|");
             dialogIndex = 0;
             dialogActive = true;
 
